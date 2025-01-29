@@ -1,0 +1,21 @@
+groups:
+  - name: transaction_metrics
+    interval: 1m
+    rules:
+      - record: transaction:rate_1m
+        expr: rate(transactions_generated_total[1m])
+      
+      - record: transaction:error_rate_1m
+        expr: rate(transaction_errors_total[1m])
+      
+      - record: transaction:latency_p95_1m
+        expr: histogram_quantile(0.95, rate(transaction_latency_seconds_bucket[1m]))
+
+  - name: failover_metrics
+    interval: 1m
+    rules:
+      - record: server:availability_ratio
+        expr: avg_over_time(up{job="app-servers"}[5m])
+      
+      - record: mongodb:replication_lag
+        expr: avg_over_time(mongodb_replset_member_optime_date{state="SECONDARY"}[1m]) - on(set) group_left avg_over_time(mongodb_replset_member_optime_date{state="PRIMARY"}[1m])

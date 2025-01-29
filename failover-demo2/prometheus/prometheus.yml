@@ -1,0 +1,92 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+  external_labels:
+    monitor: 'failover-testing-system'
+
+# Rule files contain recording rules and alerting rules
+rule_files:
+  - "rules/alert_rules.yml"
+  - "rules/recording_rules.yml"
+
+# Alerting configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Transaction Generator metrics
+  - job_name: 'transaction-generators'
+    static_configs:
+      - targets: 
+          - 'transaction-generator-1:8000'
+          - 'transaction-generator-2:8000'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '(.*):8000'
+        target_label: instance
+        replacement: '${1}'
+
+  # Application Server metrics
+  - job_name: 'app-servers'
+    static_configs:
+      - targets:
+          - 'localhost:8080'
+          - 'localhost:8080'
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  # NGINX metrics
+# NGINX Prometheus Exporter
+  - job_name: 'nginx_exporter'
+    static_configs:
+      - targets: ['nginx-prometheus-exporter:9113']
+    scrape_interval: 5s
+
+
+  # Node Exporter metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 5s
+
+  # MongoDB metrics
+  - job_name: 'mongodb'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+        regex: '(.*):9216'
+        replacement: '${1}'
+
+  # Kafka metrics
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+    scrape_interval: 5s
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'kafka_(.+)'
+        target_label: kafka_metric
+        replacement: '${1}'
+
+  # ZooKeeper metrics (if using JMX exporter)
+  - job_name: 'zookeeper'
+    static_configs:
+      - targets: ['zookeeper:7070']
+    scrape_interval: 5s

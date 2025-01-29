@@ -1,0 +1,379 @@
+version: '3.8'
+
+services:
+  # Load Generators
+  transaction-generator-1:
+    build: 
+      context: ./transaction-generator
+      dockerfile: Dockerfile
+    environment:
+      - LOAD_BALANCER_URL=http://nginx:80
+      - GENERATION_RATE=10
+    depends_on:
+      - nginx
+    networks:
+      - frontend
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+  transaction-generator-2:
+    build: 
+      context: ./transaction-generator
+      dockerfile: Dockerfile
+    environment:
+      - LOAD_BALANCER_URL=http://nginx:80
+      - GENERATION_RATE=10
+    depends_on:
+      - nginx
+    networks:
+      - frontend
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+  # Load Balancer
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "8080:80"
+    networks:
+      - frontend
+      - backend
+      - monitoring
+    depends_on:
+      - app-server-1
+      - app-server-2
+      
+  nginx-prometheus-exporter:
+    image: nginx/nginx-prometheus-exporter:0.11.0
+    command:
+      - '-nginx.scrape-uri=http://nginx:80/metrics' # Replace with the correct path if it is different
+    ports:
+      - "9113:9113" # Expose the exporter on port 9113
+    networks:
+      - monitoring
+    depends_on:
+      - nginx
+
+  # Application Servers
+  app-server-1:
+    build:
+      context: ./app-server
+      dockerfile: Dockerfile
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-1:9092,kafka-2:9092
+      - SERVER_ID=1
+    networks:
+      - frontend
+      - backend
+      - monitoring
+      - db_net
+    depends_on:
+      - mongo-1
+      - mongo-2
+      - kafka-exporter
+    deploy:
+      restart_policy:
+        condition: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  app-server-2:
+    build:
+      context: ./app-server
+      dockerfile: Dockerfile
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-1:9092,kafka-2:9092
+      - SERVER_ID=2
+    networks:
+      - frontend
+      - backend
+      - monitoring
+      - db_net
+    depends_on:
+      - mongo-1
+      - mongo-2
+      - kafka-exporter
+    deploy:
+      restart_policy:
+        condition: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Kafka Cluster
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - kafka_net
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+
+  kafka-1:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-1:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - kafka_net
+      - backend
+      - monitoring
+    volumes:
+      - kafka1_data:/var/lib/kafka/data
+
+  kafka-2:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-2:9092,PLAINTEXT_HOST://localhost:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - kafka_net
+      - backend
+      - monitoring
+    volumes:
+      - kafka2_data:/var/lib/kafka/data
+      
+  kafka-3:
+    image: confluentinc/cp-kafka:latest
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 3
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka-3:9092,PLAINTEXT_HOST://localhost:29094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_MIN_INSYNC_REPLICAS: 2
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - kafka_net
+      - backend
+      - monitoring
+    volumes:
+      - kafka3_data:/var/lib/kafka/data
+
+  # MongoDB Replica Set
+
+  mongo-1:
+    image: mongo:latest
+    volumes:
+      - mongo1_data:/data/db
+    networks:
+      - backend
+      - db_net
+      - monitoring
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'db.runCommand({ ping: 1 }).ok' | mongosh --host localhost --port 27017 --quiet | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+
+  mongo-2:
+    image: mongo:latest
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - backend
+      - db_net
+      - monitoring
+    ports:
+      - "27018:27017"
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'db.runCommand({ ping: 1 }).ok' | mongosh --host localhost --port 27017 --quiet | grep 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+
+  mongo-init:
+    build:
+      context: ./mongo-init
+      dockerfile: Dockerfile
+    depends_on:
+      mongo-1:
+        condition: service_healthy
+      mongo-2:
+        condition: service_healthy
+    networks:
+      - backend
+      - db_net
+    environment:
+      - MONGO_PRIMARY_HOST=mongo-1:27017
+      - MONGO_SECONDARY_HOST=mongo-2:27017
+    restart: "on-failure"
+    
+  mysql:
+    image: mysql:latest
+    container_name: mysql-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: kafka_sink
+      MYSQL_USER: kafkauser
+      MYSQL_PASSWORD: kafkapassword
+    ports:
+      - "3307:3306"
+    networks:
+      - db_net
+      - monitoring
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u$$MYSQL_USER", "-p$$MYSQL_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-mysql-consumer:
+    build:
+      context: ./mysql-consumer
+      dockerfile: Dockerfile.consumer
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - mysql
+    networks:
+      - kafka_net
+      - db_net
+    restart: unless-stopped
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka-1:9092,kafka-2:9092
+      - KAFKA_TOPIC=transactions
+      - KAFKA_GROUP_ID=mysql-consumer-group
+
+  # Monitoring Stack
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    networks:
+      - monitoring
+
+  mongodb-exporter:
+    image: percona/mongodb_exporter:0.43.1
+    command:
+      - '--mongodb.uri=mongodb://mongo-1:27017'
+      - '--log.level=debug'
+      - '--collect-all'
+    networks:
+      - monitoring
+      - db_net
+    depends_on:
+      - mongo-1
+    environment:
+      - MONGODB_URI=mongodb://mongo-1:27017
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    command:
+      - '--kafka.server=kafka-1:9092'
+      - '--kafka.server=kafka-2:9092'
+    restart: always 
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - mongo-init
+    networks:
+      - monitoring
+      - kafka_net
+
+  mysql-exporter:
+    image: prom/mysqld-exporter
+    environment:
+      - DATA_SOURCE_NAME=kafkauser:kafkapassword@(mysql-db:3306)/kafka_sink
+    ports:
+      - "9104:9104"
+    networks:
+      - db_net
+      - monitoring
+    depends_on:
+      - mysql
+
+networks:
+  frontend:
+  backend:
+  kafka_net:
+  db_net:
+  monitoring:
+
+volumes:
+  zookeeper_data:
+  kafka1_data:
+  kafka2_data:
+  kafka3_data:
+  mongo1_data:
+  mongo2_data:
+  prometheus_data:
+  grafana_data:
+  mysql_data:

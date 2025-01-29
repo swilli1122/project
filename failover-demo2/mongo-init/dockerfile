@@ -1,0 +1,12 @@
+FROM mongo:latest
+
+# Copy the initialization script
+COPY init-replica-set.sh /init-replica-set.sh
+
+RUN apt-get update && apt-get install -y iputils-ping
+
+# Make the script executable
+RUN chmod +x /init-replica-set.sh
+
+# Set the entrypoint to the initialization script
+ENTRYPOINT ["/init-replica-set.sh"]

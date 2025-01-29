@@ -1,0 +1,47 @@
+groups:
+  - name: failover_alerts
+    rules:
+      - alert: ServerDown
+        expr: up{job="app-servers"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Server {{ $labels.instance }} is down"
+          description: "Server has been down for more than 1 minute."
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(transaction_latency_seconds_bucket[5m])) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High transaction latency detected"
+          description: "95th percentile latency is above 500ms for 5 minutes."
+
+      - alert: HighErrorRate
+        expr: rate(transaction_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High transaction error rate"
+          description: "Error rate is above 10% for 5 minutes."
+
+      - alert: MongoDBReplicationLag
+        expr: mongodb_replset_member_optime_date{state="SECONDARY"} - ignoring(state) group_left mongodb_replset_member_optime_date{state="PRIMARY"} > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MongoDB replication lag detected"
+          description: "Secondary is more than 10 seconds behind primary for 5 minutes."
+
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 2
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Kafka broker down"
+          description: "Less than 2 Kafka brokers are running."
